@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PAIR-O-MATIC</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons CDN for visual elements -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Custom Keyframe Styles */
+        @keyframes pop-in {
+          0% { opacity: 0; transform: translateY(20px) scale(0.9); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .animate-pop-in {
+          animation: pop-in 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        .animate-spin-slow {
+          animation: spin 3s linear infinite;
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .perspective-1000 {
+            perspective: 1000px;
+        }
+
+        /* Utility for Lucide Icons in plain JS */
+        .icon {
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        /* Custom scrollbar for a dark theme aesthetic */
+        .custom-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #1e293b; /* slate-800 */
+        }
+
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #475569; /* slate-600 */
+            border-radius: 4px;
+        }
+
+        .custom-scroll::-webkit-scrollbar-thumb:hover {
+            background: #64748b; /* slate-500 */
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-900 text-slate-100 font-sans p-4 flex flex-col items-center overflow-hidden">
+    <!-- Main App Container - JavaScript will manage its content -->
+    <div id="app-root" class="w-full h-full flex flex-col items-center">
+        <!-- Content will be injected here by the script -->
+    </div>
+
+    <script>
+        // --- Initial Data ---
+        const initialList1 = ['Ojan', 'Mike', 'Dion', 'Firman'];
+        const initialList2 = ['Budi', 'Angga', 'Kanaya', 'Jovanka'];
+
+        // --- State Variables (Mimicking React's useState) ---
+        let list1 = [...initialList1];
+        let list2 = [...initialList2];
+        let results = [];
+        let isSpinning = false;
+        let showSettings = false;
+        let displayPairs = [];
+        let animationRef = null;
+
+        const root = document.getElementById('app-root');
+
+        // Utility to insert Lucide Icons
+        const getIconSvg = (name, size = 24, classes = '') => {
+            const iconKey = name.charAt(0).toUpperCase() + name.slice(1);
+            if (typeof lucide !== 'undefined' && lucide[iconKey]) {
+                let iconFn = lucide[iconKey];
+
+                // FIX: Check if the icon component is wrapped in an array (a common issue with some CDN imports)
+                if (Array.isArray(iconFn) && iconFn.length > 0) {
+                    iconFn = iconFn[0];
+                }
+                
+                if (typeof iconFn === 'function') {
+                    const icon = iconFn({ width: size, height: size, class: `icon ${classes}` });
+                    const div = document.createElement('div');
+                    div.innerHTML = icon.toSvg();
+                    return div.firstChild.outerHTML;
+                }
+            }
+            return '';
+        };
+
+        // --- State Update Function ---
+        const updateState = (newState, callback = null) => {
+            // Apply new state values
+            if (newState.list1) list1 = newState.list1;
+            if (newState.list2) list2 = newState.list2;
+            if (newState.results !== undefined) results = newState.results;
+            if (newState.isSpinning !== undefined) isSpinning = newState.isSpinning;
+            if (newState.showSettings !== undefined) showSettings = newState.showSettings;
+            if (newState.displayPairs) displayPairs = newState.displayPairs;
+
+            // Trigger re-render
+            render();
+            if (callback) callback();
+        };
+
+        // --- Helper Functions ---
+
+        const shuffleArray = (array) => {
+            const newArr = [...array];
+            for (let i = newArr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+            }
+            return newArr;
+        };
+
+        // --- Core Logic Functions ---
+
+        window.handleAddMember = (listType) => {
+            if (listType === 1) {
+                updateState({ list1: [...list1, 'New Member'] });
+            } else {
+                updateState({ list2: [...list2, 'New Member'] });
+            }
+        };
+
+        window.handleRemoveMember = (idx, listType) => {
+            let currentList = listType === 1 ? list1 : list2;
+            if (currentList.length <= 1) return;
+
+            const newList = currentList.filter((_, i) => i !== idx);
+
+            if (listType === 1) {
+                updateState({ list1: newList });
+            } else {
+                updateState({ list2: newList });
+            }
+        };
+
+        window.handleListChange = (idx, value, listType) => {
+            if (listType === 1) {
+                list1[idx] = value;
+            } else {
+                list2[idx] = value;
+            }
+            // Note: We use the 'onblur' in the HTML template to call render for simplicity
+        };
+
+        const generateRiggedPairs = () => {
+            const targetAName = "Firman";
+            // The preferred partners for Firman
+            const preferredPartners = ["Angga", "Budi"];
+
+            const targetA = list1.find(name => name.toLowerCase() === targetAName.toLowerCase());
+
+            // 1. Find which preferred partner is available in list2
+            const availablePartners = list2.filter(name => 
+                preferredPartners.map(p => p.toLowerCase()).includes(name.toLowerCase())
+            );
+
+            let finalPairs = [];
+            let rigged = false;
+
+            if (targetA && availablePartners.length > 0) {
+                // Rigging Condition Met: Firman is present, and at least one preferred partner is available
+                rigged = true;
+                
+                // Select one available partner randomly from Angga or Budi
+                const riggedPartnerBName = availablePartners[Math.floor(Math.random() * availablePartners.length)];
+
+                // Create remaining lists by filtering out the rigged members
+                const remainingA = list1.filter(name => name.toLowerCase() !== targetA.toLowerCase());
+                const remainingB = list2.filter(name => name.toLowerCase() !== riggedPartnerBName.toLowerCase());
+
+                // Perform the rest of the random pairing
+                const shuffledA = shuffleArray(remainingA);
+                const shuffledB = shuffleArray(remainingB);
+
+                const maxLength = Math.max(shuffledA.length, shuffledB.length);
+                for (let i = 0; i < maxLength; i++) {
+                    finalPairs.push({
+                        a: shuffledA[i] || "???",
+                        b: shuffledB[i] || "???"
+                    });
+                }
+
+                // Add the rigged pair
+                const riggedPair = {
+                    a: targetA,
+                    b: riggedPartnerBName
+                };
+
+                // Insert the rigged pair randomly into the results
+                const randomIndex = Math.floor(Math.random() * (finalPairs.length + 1));
+                finalPairs.splice(randomIndex, 0, riggedPair);
+
+            } else {
+                // Fallback: Pure Random Pairing
+                const shuffledA = shuffleArray(list1);
+                const shuffledB = shuffleArray(list2);
+                const maxLength = Math.max(shuffledA.length, shuffledB.length);
+
+                for (let i = 0; i < maxLength; i++) {
+                    finalPairs.push({
+                        a: shuffledA[i] || "???",
+                        b: shuffledB[i] || "???"
+                    });
+                }
+            }
+            return finalPairs;
+        };
+
+        window.handleSpin = () => {
+            if (isSpinning) return;
+
+            updateState({ isSpinning: true, results: [] });
+
+            const finalOutcome = generateRiggedPairs();
+
+            let steps = 0;
+            const maxSteps = 25;
+
+            const runAnimation = () => {
+                clearTimeout(animationRef);
+
+                // Create random visual noise
+                const noisyPairs = [];
+                const shuffledA = shuffleArray(list1);
+                const shuffledB = shuffleArray(list2);
+                for (let i = 0; i < Math.max(list1.length, list2.length); i++) {
+                    noisyPairs.push({
+                        a: shuffledA[i] || "?",
+                        b: shuffledB[i] || "?"
+                    });
+                }
+
+                // Update state and render the flicker
+                updateState({ displayPairs: noisyPairs }, () => {
+                    steps++;
+
+                    if (steps < maxSteps) {
+                        // Slow down randomly near the end
+                        const nextDelay = steps > 20 ? 200 : 80;
+                        animationRef = setTimeout(runAnimation, nextDelay);
+                    } else {
+                        // FINISH
+                        clearTimeout(animationRef);
+                        updateState({ displayPairs: finalOutcome, results: finalOutcome, isSpinning: false });
+                    }
+                });
+            };
+
+            runAnimation();
+        };
+
+        // --- DOM Rendering Function ---
+
+        const render = () => {
+            // Using a single large string template for simplicity, mimicking JSX/React rendering
+            root.innerHTML = `
+                <!-- Background Decor -->
+                <div class="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none opacity-20">
+                    <div class="absolute top-10 left-10 w-64 h-64 bg-purple-600 rounded-full blur-3xl animate-pulse"></div>
+                    <div class="absolute bottom-10 right-10 w-96 h-96 bg-blue-600 rounded-full blur-3xl animate-pulse" style="animation-duration: 4s;"></div>
+                </div>
+
+                <!-- Header -->
+                <header class="z-10 w-full max-w-4xl flex justify-between items-center mb-8 pt-4">
+                    <div>
+                        <h1 class="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500 tracking-tighter drop-shadow-sm">
+                            PAIR-O-MATIC
+                        </h1>
+                        <p class="text-slate-400 text-sm">Totally Random* Pair Generator</p>
+                    </div>
+                    <button
+                        id="settings-toggle-btn"
+                        class="p-2 bg-slate-800 rounded-full hover:bg-slate-700 transition-colors"
+                    >
+                        ${showSettings ? getIconSvg('X', 20) : getIconSvg('Settings', 20)}
+                    </button>
+                </header>
+
+                <!-- Main Content Area -->
+                <main class="z-10 w-full max-w-4xl flex flex-col md:flex-row gap-8 items-start justify-center">
+
+                    <!-- Settings Panel (Toggleable) -->
+                    ${showSettings ? `
+                        <div id="settings-panel" class="w-full md:w-1/3 bg-slate-800/50 backdrop-blur-md border border-slate-700 p-4 rounded-xl shadow-xl">
+                            <h3 class="font-bold text-lg mb-4 text-purple-400 flex items-center gap-2">
+                                ${getIconSvg('RefreshCw', 18)} Configure Lists
+                            </h3>
+                            
+                            <!-- Scrollable Container FIX: Added max-h-96 and overflow-y-auto -->
+                            <div class="space-y-6 max-h-[400px] md:max-h-[70vh] overflow-y-auto pr-2 custom-scroll">
+                                <!-- Group 1 -->
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Group 1 (Pairs_1)</label>
+                                    ${list1.map((name, i) => `
+                                        <div class="flex items-center mb-2">
+                                            <input
+                                                value="${name}"
+                                                data-index="${i}"
+                                                data-type="1"
+                                                oninput="handleListChange(${i}, this.value, 1)"
+                                                onblur="render()" 
+                                                class="flex-grow bg-slate-900/50 border border-slate-700 rounded-l px-3 py-2 focus:outline-none focus:border-purple-500 transition-colors text-sm"
+                                            />
+                                            ${list1.length > 1 ? `
+                                                <button
+                                                    onclick="handleRemoveMember(${i}, 1)"
+                                                    class="p-2 bg-red-600 hover:bg-red-700 text-white rounded-r transition-colors text-sm"
+                                                    title="Remove member"
+                                                >
+                                                    ${getIconSvg('X', 16)}
+                                                </button>
+                                            ` : ''}
+                                        </div>
+                                    `).join('')}
+                                    <button
+                                        onclick="handleAddMember(1)"
+                                        class="w-full mt-2 py-2 bg-green-600 hover:bg-green-700 rounded transition-colors text-sm font-semibold flex items-center justify-center gap-1"
+                                    >
+                                        ${getIconSvg('Plus', 16)} Add Member to Group 1
+                                    </button>
+                                </div>
+
+                                <!-- Group 2 -->
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Group 2 (Pairs_2)</label>
+                                    ${list2.map((name, i) => `
+                                        <div class="flex items-center mb-2">
+                                            <input
+                                                value="${name}"
+                                                data-index="${i}"
+                                                data-type="2"
+                                                oninput="handleListChange(${i}, this.value, 2)"
+                                                onblur="render()"
+                                                class="flex-grow bg-slate-900/50 border border-slate-700 rounded-l px-3 py-2 focus:outline-none focus:border-purple-500 transition-colors text-sm"
+                                            />
+                                            ${list2.length > 1 ? `
+                                                <button
+                                                    onclick="handleRemoveMember(${i}, 2)"
+                                                    class="p-2 bg-red-600 hover:bg-red-700 text-white rounded-r transition-colors text-sm"
+                                                    title="Remove member"
+                                                >
+                                                    ${getIconSvg('X', 16)}
+                                                </button>
+                                            ` : ''}
+                                        </div>
+                                    `).join('')}
+                                    <button
+                                        onclick="handleAddMember(2)"
+                                        class="w-full mt-2 py-2 bg-green-600 hover:bg-green-700 rounded transition-colors text-sm font-semibold flex items-center justify-center gap-1"
+                                    >
+                                        ${getIconSvg('Plus', 16)} Add Member to Group 2
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- End Scrollable Container -->
+
+                        </div>
+                    ` : ''}
+
+                    <!-- The Wheel / Display Area -->
+                    <div class="flex-1 w-full flex flex-col items-center">
+
+                        <!-- Action Button -->
+                        <div class="mb-8">
+                            <button
+                                onclick="handleSpin()"
+                                ${isSpinning ? 'disabled' : ''}
+                                class="
+                                    relative group overflow-hidden rounded-full px-12 py-6 font-bold text-2xl tracking-widest text-white shadow-[0_0_40px_-10px_rgba(168,85,247,0.5)]
+                                    transition-all duration-300 transform active:scale-95
+                                    ${isSpinning ? 'cursor-not-allowed opacity-80' : 'hover:scale-105 hover:shadow-[0_0_60px_-10px_rgba(168,85,247,0.7)]'}
+                                "
+                            >
+                                <div class="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-transform duration-1000 ${isSpinning ? 'animate-spin-slow' : ''}"></div>
+                                <div class="absolute inset-1 bg-slate-900 rounded-full flex items-center justify-center z-10">
+                                    <span class="bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 flex items-center gap-3">
+                                        ${isSpinning ? `
+                                            ${getIconSvg('RotateCw', 28, 'animate-spin')} SPINNING...
+                                        ` : `
+                                            ${getIconSvg('Play', 24, 'fill-current')} SPIN NOW
+                                        `}
+                                    </span>
+                                </div>
+                            </button>
+                        </div>
+
+                        <!-- Results Display -->
+                        <div class="w-full grid grid-cols-1 sm:grid-cols-2 gap-4 perspective-1000">
+                            ${(results.length > 0 || isSpinning ? displayPairs : []).map((pair, idx) => `
+                                <div
+                                    key="${idx}"
+                                    class="
+                                        relative bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700
+                                        rounded-2xl p-6 shadow-2xl flex items-center justify-between
+                                        transform transition-all duration-500 hover:border-purple-500/50
+                                        ${!isSpinning ? 'animate-pop-in' : 'scale-95 opacity-90 blur-[1px]'}
+                                    "
+                                    style="animation-delay: ${idx * 100}ms"
+                                >
+                                    <!-- Visual Connector Line -->
+                                    <div class="absolute left-1/2 top-0 bottom-0 w-px bg-slate-700/50 -translate-x-1/2"></div>
+                                    <div class="absolute left-1/2 top-1/2 w-8 h-8 -mt-4 -ml-4 bg-slate-800 border-2 border-purple-500 rounded-full z-10 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                                        <span class="text-purple-400 text-xs font-bold">VS</span>
+                                    </div>
+
+                                    <!-- Left Side -->
+                                    <div class="flex-1 text-center pr-6">
+                                        <div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Pair 1</div>
+                                        <div class="font-bold text-xl text-slate-100">
+                                            ${pair.a}
+                                        </div>
+                                    </div>
+
+                                    <!-- Right Side -->
+                                    <div class="flex-1 text-center pl-6">
+                                        <div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Pair 2</div>
+                                        <div class="font-bold text-xl text-slate-100">
+                                            ${pair.b}
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+
+                            <!-- Empty State / Initial View -->
+                            ${!isSpinning && results.length === 0 ? `
+                                <div class="col-span-1 sm:col-span-2 text-center py-20 bg-slate-800/20 rounded-2xl border-2 border-dashed border-slate-700">
+                                    <p class="text-slate-500 text-lg">Ready to create pairs?</p>
+                                    <p class="text-slate-600 text-sm mt-2">Click Spin to randomize the teams!</p>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                    </div>
+                </main>
+            `;
+
+            // --- Event Listener Re-attachment (Crucial for full innerHTML replacement) ---
+            const settingsToggleBtn = document.getElementById('settings-toggle-btn');
+            if (settingsToggleBtn) {
+                settingsToggleBtn.onclick = () => updateState({ showSettings: !showSettings });
+            }
+        };
+
+        // Initial render on page load
+        document.addEventListener('DOMContentLoaded', render);
+
+        // Cleanup function 
+        window.onbeforeunload = () => {
+            clearTimeout(animationRef);
+        };
+    </script>
+</body>
+</html>
